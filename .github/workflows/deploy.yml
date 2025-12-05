@@ -1,4 +1,4 @@
-name: Deploy React Vite App to EC2
+name: Deploy Local Build to EC2
 
 on:
   push:
@@ -10,71 +10,48 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # 1️⃣ Checkout the repo
-      - name: Checkout code
+      - name: Checkout repo
         uses: actions/checkout@v3
 
-      # 2️⃣ Setup Node.js
-      - name: Setup Node.js
+      - name: Install Node.js
         uses: actions/setup-node@v3
         with:
           node-version: 20
 
-      # 3️⃣ Install dependencies
       - name: Install dependencies
-        run: npm ci
+        run: npm install
 
-      # 4️⃣ Build React Vite app
       - name: Build React app
         run: npm run build
 
-      # 5️⃣ Zip the dist folder
-      - name: Zip dist folder
+      - name: Zip build folder
         run: zip -r react-build.zip dist
 
-      # 6️⃣ Copy zip to EC2
       - name: Copy build to EC2
         uses: appleboy/scp-action@v0.1.6
         with:
           host: ${{ secrets.EC2_HOST }}
-          username: ubuntu
+          username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_KEY }}
           port: 22
           source: "react-build.zip"
           target: "/home/ubuntu/"
+          rm: true # पहले target में file delete कर देगा
 
-      # 7️⃣ Deploy on EC2
-      - name: Deploy on EC2
+      - name: SSH into EC2 and deploy
         uses: appleboy/ssh-action@v0.1.6
         with:
           host: ${{ secrets.EC2_HOST }}
-          username: ubuntu
+          username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_KEY }}
+          port: 22
           script: |
+            # Remove old HTML
             sudo rm -rf /var/www/html/*
+            # Unzip new build
             sudo unzip -o /home/ubuntu/react-build.zip -d /var/www/html/
+            # Fix permissions
             sudo chown -R www-data:www-data /var/www/html/
             sudo chmod -R 755 /var/www/html/
+            # Restart nginx
             sudo systemctl restart nginx
-
-      # 8️⃣ Setup Nginx for React SPA routing
-      - name: Setup SPA rewrite
-        uses: appleboy/ssh-action@v0.1.6
-        with:
-          host: ${{ secrets.EC2_HOST }}
-          username: ubuntu
-          key: ${{ secrets.EC2_KEY }}
-          script: |
-            echo 'server {
-                listen 80 default_server;
-                listen [::]:80 default_server;
-
-                root /var/www/html;
-                index index.html index.htm;
-
-                location / {
-                    try_files $uri /index.html;
-                }
-            }' | sudo tee /etc/nginx/sites-available/default
-            sudo nginx -t
-            sudo systemctl reload nginx
